@@ -1,0 +1,544 @@
+local expireTime = os.time({year=9999, month=12, day=31, hour=24, min=60, sec=60})
+
+local function getRemainingTime()
+    local now = os.time()
+    local diff = expireTime - now
+    if diff <= 0 then
+        return "已过期"
+    end
+    local days = math.floor(diff / 86400)
+    diff = diff % 86400
+    local hours = math.floor(diff / 3600)
+    diff = diff % 3600
+    local minutes = math.floor(diff / 60)
+    local seconds = diff % 60
+    return string.format("%d天%d小时%d分%d秒", days, hours, minutes, seconds)
+end
+
+if ScriptKey == "WOWFREEKey" then
+    print("WOW FREE loder 100%")
+    local remaining = getRemainingTime()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "WOW免费版",
+        Text = "当前卡密: " .. ScriptKey .. " 距离过期时间还有: " .. remaining,
+        Duration = 5
+    })
+    task.spawn(function()
+    while true do
+        require(game.ReplicatedStorage.devv).load("makeToast")("购买WOW付费版前往卡网https://www.qianxun1688.com/links/94C6D8AB", "rainbow", 1)
+        task.wait(1)
+    end
+end)
+task.wait(1.5)
+do
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "WOW免费版",
+    Text = "初始化完成",
+    Duration = 1,
+})
+end
+task.wait(1)
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local VirtualUser = game:GetService("VirtualUser")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local LocalPlayer = Players.LocalPlayer
+local CurrentCamera = Workspace.CurrentCamera
+
+local maskBaseLocation = CFrame.new(604.114014, 5.09485245, -1018.1275)
+local idleLocation = CFrame.new(1653.397216796875, -16.95315170288086, -530.3738403320312)
+local grenadeBuyLocation = CFrame.new(659.044739, 5.77163315, -706.697632, -1.1920929e-07, 0, -1.00000012, 0, 1, 0, 1.00000012, 0, -1.1920929e-07)
+local bombThrowLocation = CFrame.new(1129.0994873046875, 14.843579292297363, -354.19488525390625)
+local bombTargetPosition = Vector3.new(1124.0853271484, 5.3128666877747, -357.68710327148)
+local afterExplosionWaitLocation = CFrame.new(1112.95142, 16.6149864, -331.99646, 0, 0, -1, 0, 1, 0, 1, 0, 0)
+
+local idleTeleportEnabled = true
+local busy = false
+local maskBuying = false
+local autoBalloon = true
+local autoPrinter = true
+local autoSell = true
+local autoCash = true
+local autoMask = true
+local autoCycle = true
+local cycleRunning = true
+local cycleThread = nil
+
+local Remotes, Inventory
+pcall(function()
+    Remotes = require(ReplicatedStorage.devv.client.Helpers.remotes.Signal)
+    Inventory = require(ReplicatedStorage.devv).load("v3item").inventory
+end)
+local FireServer = Remotes and Remotes.FireServer
+local InvokeServer = Remotes and Remotes.InvokeServer
+
+local function notify(title, text)
+    pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Duration = 2,
+        })
+    end)
+end
+
+local itemMap = {}
+local function updateCache()
+    local itemPickup = Workspace.Game.Entities:FindFirstChild("ItemPickup")
+    if not itemPickup then itemMap = {} return end
+    itemMap = {}
+    for _, model in pairs(itemPickup:GetChildren()) do
+        for _, v in pairs(model:GetChildren()) do
+            if v:IsA("MeshPart") or v:IsA("Part") then
+                local prompt = v:FindFirstChildOfClass("ProximityPrompt")
+                if prompt and prompt.ObjectText then
+                    itemMap[prompt.ObjectText] = { part = v, prompt = prompt }
+                end
+            end
+        end
+    end
+end
+updateCache()
+local itemPickupFolder = Workspace.Game.Entities:FindFirstChild("ItemPickup")
+if itemPickupFolder then
+    itemPickupFolder.ChildAdded:Connect(updateCache)
+    itemPickupFolder.ChildRemoved:Connect(updateCache)
+end
+
+local itemFailCounts = {}
+local function Autoitem(itemName)
+    local itemData = itemMap[itemName]
+    if not itemData then
+        itemFailCounts[itemName] = (itemFailCounts[itemName] or 0) + 1
+        return false
+    end
+    local char = LocalPlayer.Character
+    if not char then
+        itemFailCounts[itemName] = (itemFailCounts[itemName] or 0) + 1
+        return false
+    end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        itemFailCounts[itemName] = (itemFailCounts[itemName] or 0) + 1
+        return false
+    end
+    root.CFrame = itemData.part.CFrame
+    itemData.prompt.RequiresLineOfSight = false
+    itemData.prompt.HoldDuration = 0
+    fireproximityprompt(itemData.prompt)
+    itemFailCounts[itemName] = 0
+    return true
+end
+
+LocalPlayer.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0, 0), CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0, 0), CurrentCamera.CFrame)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.K then
+        idleTeleportEnabled = not idleTeleportEnabled
+    end
+end)
+
+local function buyMaskOnce()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if char:FindFirstChild("Black Bandana") then return end
+    local offsetX = math.random(-8, 8)
+    local offsetZ = math.random(-8, 8)
+    local randomPos = maskBaseLocation.Position + Vector3.new(offsetX, 0, offsetZ)
+    root.CFrame = CFrame.new(randomPos)
+    task.wait(0.5)
+    local Signal = require(ReplicatedStorage.devv).load("Signal")
+    local b1 = require(ReplicatedStorage.devv).load("v3item").inventory.items
+    Signal.InvokeServer("attemptPurchase", "Black Bandana")
+    task.wait(0.3)
+    for _, v in pairs(b1) do
+        if v.name == "Black Bandana" then
+            Signal.FireServer("equip", v.guid)
+            Signal.FireServer("wearMask", v.guid)
+            break
+        end
+    end
+    notify("自动面罩", "已尝试购买并装备黑色面罩")
+end
+
+local function ensureMask()
+    while autoMask do
+        local char = LocalPlayer.Character
+        if char and char:FindFirstChild("Black Bandana") then
+            return true
+        end
+        pcall(buyMaskOnce)
+        task.wait(0.5)
+    end
+end
+
+local function maskRoutine()
+    maskBuying = true
+    ensureMask()
+    task.wait(2)
+    maskBuying = false
+end
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    character:WaitForChild("HumanoidRootPart", 10)
+    busy = false
+    maskBuying = false
+    if autoMask then
+        task.spawn(maskRoutine)
+    end
+end)
+
+local function getRoot()
+    local char = LocalPlayer.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function collectNearbyCash()
+    local root = getRoot()
+    if not root then return end
+    local cb = Workspace:FindFirstChild("Game") and Workspace.Game.Entities:FindFirstChild("CashBundle")
+    if not cb then return end
+    for _, cash in pairs(cb:GetChildren()) do
+        local part = cash:FindFirstChildOfClass("Part")
+        if part then
+            local distance = (root.Position - part.Position).Magnitude
+            if distance <= 90 then
+                local cd = cash:FindFirstChildOfClass("ClickDetector")
+                if cd then
+                    fireclickdetector(cd)
+                end
+            end
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        if autoCash then
+            local root = getRoot()
+            if root then
+                local cb = Workspace:FindFirstChild("Game") and Workspace.Game.Entities:FindFirstChild("CashBundle")
+                if cb then
+                    local collected = false
+                    for _, cash in pairs(cb:GetChildren()) do
+                        local part = cash:FindFirstChildOfClass("Part")
+                        if part then
+                            local distance = (root.Position - part.Position).Magnitude
+                            if distance <= 90 then
+                                local cd = cash:FindFirstChildOfClass("ClickDetector")
+                                if cd then
+                                    fireclickdetector(cd)
+                                    collected = true
+                                end
+                            end
+                        end
+                    end
+                    if collected then
+                        notify("自动捡现金", "已拾取附近的现金")
+                    end
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if autoBalloon and not busy then
+            for _, name in ipairs({"Bunny Balloon", "Ghost Balloon", "Clover Balloon", "Bat Balloon", "Gold Clover Balloon", "Golden Rose", "Black Rose", "Heart Balloon"}) do
+                local success = Autoitem(name)
+                if success then
+                    notify("自动捡气球", "捡到了 " .. name)
+                    task.wait(0.2)
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    while true do
+        if autoPrinter and not busy then
+            if (itemFailCounts["Money Printer"] or 0) < 12 then
+                local success = Autoitem("Money Printer")
+                if success then
+                    notify("自动捡印钞机", "捡到了 Money Printer")
+                    task.wait(0.2)
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    local Signal = require(ReplicatedStorage.devv).load("Signal")
+    local itemModule = require(ReplicatedStorage.devv).load("v3item")
+    while true do
+        if autoSell then
+            local soldCount = 0
+            for _, v in pairs(itemModule.inventory.items) do
+                pcall(function()
+                    Signal.FireServer("equip", v.guid)
+                    Signal.FireServer("sellItem", v.guid)
+                    soldCount = soldCount + 1
+                end)
+            end
+            if soldCount > 0 then
+                notify("自动售卖", "已卖出 " .. soldCount .. " 件物品")
+            end
+        end
+        task.wait(1)
+    end
+end)
+
+local function runATMPhase()
+    local atms = workspace:FindFirstChild("ATMs")
+    if not atms then return end
+    local root = getRoot()
+    if not root then return end
+    busy = true
+    notify("自动ATM", "开始攻击ATM")
+    local originalCFrame = root.CFrame
+    local currentTarget = nil
+    local stop = false
+    local lockConn = nil
+    local canSearch = true
+    local function clearLock()
+        if lockConn then
+            lockConn:Disconnect()
+            lockConn = nil
+        end
+    end
+    local moveThread = task.spawn(function()
+        while not stop do
+            if canSearch then
+                local nearestATM, nearestDist = nil, math.huge
+                for _, atm in ipairs(atms:GetChildren()) do
+                    if atm:IsA("Model") and (atm:GetAttribute("health") or 0) ~= 0 then
+                        local main = atm:FindFirstChild("Main")
+                        if main and main:IsA("BasePart") then
+                            local dist = (root.Position - main.Position).Magnitude
+                            if dist < nearestDist then
+                                nearestDist = dist
+                                nearestATM = atm
+                            end
+                        end
+                    end
+                end
+                if not nearestATM then
+                    stop = true
+                    clearLock()
+                    break
+                end
+                currentTarget = nearestATM
+                local main = nearestATM:FindFirstChild("Main")
+                local lockCF = CFrame.new(main.Position - Vector3.new(0, 4, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+                root.CFrame = lockCF
+                clearLock()
+                lockConn = RunService.Heartbeat:Connect(function()
+                    if root and root.Parent then
+                        root.CFrame = lockCF
+                        root.Velocity = Vector3.zero
+                        root.RotVelocity = Vector3.zero
+                    end
+                end)
+                canSearch = false
+                task.spawn(function()
+                    task.wait(0.4)
+                    if currentTarget and currentTarget.Parent then
+                        currentTarget:SetAttribute("health", 0)
+                        collectNearbyCash()
+                        notify("自动ATM", "成功击毁一台ATM并收集现金")
+                    end
+                    task.wait(1)
+                    currentTarget = nil
+                    canSearch = true
+                end)
+            end
+            task.wait(0.1)
+        end
+        clearLock()
+    end)
+    repeat
+        task.wait(0.1)
+    until stop
+    if root then
+        root.CFrame = originalCFrame
+    end
+    busy = false
+    notify("自动ATM", "ATM阶段结束")
+end
+
+local function ensureItem(itemName, buyLocation)
+    if not InvokeServer or not FireServer then return end
+    local items = require(ReplicatedStorage.devv).load("v3item").inventory.items
+    for _, v in pairs(items) do
+        if v.name == itemName then return v.guid end
+    end
+    local root = getRoot()
+    if root then
+        root.CFrame = buyLocation
+        task.wait(0.5)
+        InvokeServer("attemptPurchase", itemName)
+        task.wait(0.5)
+    end
+    items = require(ReplicatedStorage.devv).load("v3item").inventory.items
+    for _, v in pairs(items) do
+        if v.name == itemName then return v.guid end
+    end
+    return nil
+end
+
+local function tryBankHeist()
+    if not FireServer or not InvokeServer then return false end
+    busy = true
+    notify("银行抢劫", "开始准备银行抢劫")
+    local bank = Workspace:FindFirstChild("BankRobbery")
+    if not bank then busy = false return false end
+    local cashFolder = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Cash")
+    if not cashFolder or #cashFolder:GetChildren() == 0 then
+        notify("银行抢劫", "银行没有现金，跳过")
+        busy = false
+        return false
+    end
+    local fragGuid = ensureItem("Frag", grenadeBuyLocation)
+    if not fragGuid then
+        notify("银行抢劫", "无法获取手榴弹，抢劫失败")
+        busy = false
+        return false
+    end
+    local root = getRoot()
+    if not root then busy = false return false end
+    root.CFrame = bombThrowLocation
+    task.wait(0.3)
+    FireServer("equip", fragGuid)
+    task.wait(0.1)
+    local direction = (bombTargetPosition - root.Position).Unit
+    FireServer("throwItem", fragGuid, direction, bombTargetPosition)
+    FireServer("removeItem", fragGuid)
+    notify("银行抢劫", "已投掷手榴弹")
+    task.wait(1.5)
+    bank = Workspace:FindFirstChild("BankRobbery")
+    if not bank then busy = false return false end
+    cashFolder = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Cash")
+    local pallet = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Pallet")
+    local promptPart = bank:FindFirstChild("BankCash") and bank.BankCash:FindFirstChild("Main")
+    local prompt = promptPart and promptPart:FindFirstChild("Attachment") and promptPart.Attachment:FindFirstChild("ProximityPrompt")
+    if not (cashFolder and pallet and prompt) then
+        notify("银行抢劫", "银行结构异常，抢劫失败")
+        busy = false
+        return false
+    end
+    root.CFrame = afterExplosionWaitLocation
+    local lockPos = (afterExplosionWaitLocation * CFrame.new(0, 0, -4)).Position
+    local lockCF = CFrame.new(lockPos) * CFrame.Angles(math.rad(90), 0, 0)
+    local endTime = tick() + 4
+    while tick() < endTime do
+        root = getRoot()
+        if root then
+            root.CFrame = lockCF
+            root.Velocity = Vector3.zero
+            root.RotVelocity = Vector3.zero
+        end
+        task.wait(0.2)
+    end
+    local collectCF = CFrame.new((pallet.CFrame * CFrame.new(0, -2, 0)).Position) * CFrame.Angles(math.rad(90), 0, 0)
+    root = getRoot()
+    if root then
+        root.CFrame = collectCF
+    end
+    local cashConnection
+    cashConnection = RunService.Heartbeat:Connect(function()
+        if not cashFolder or not cashFolder.Parent or #cashFolder:GetChildren() == 0 then
+            if cashConnection then cashConnection:Disconnect() end
+            return
+        end
+        collectNearbyCash()
+        pcall(function() fireproximityprompt(prompt) end)
+    end)
+    notify("银行抢劫", "正在收集现金...")
+    while bank and cashFolder and prompt.Enabled and #cashFolder:GetChildren() > 0 do
+        root = getRoot()
+        if not root then break end
+        root.CFrame = collectCF
+        root.Velocity = Vector3.zero
+        root.RotVelocity = Vector3.zero
+        task.wait(0.2)
+    end
+    if cashConnection then cashConnection:Disconnect() end
+    root = getRoot()
+    if root then
+        root.CFrame = idleLocation
+        root.Velocity = Vector3.zero
+        root.RotVelocity = Vector3.zero
+    end
+    busy = false
+    notify("银行抢劫", "抢劫完成！")
+    return true
+end
+
+local function cycleLoop()
+    while cycleRunning do
+        pcall(runATMPhase)
+        pcall(tryBankHeist)
+        task.wait(0.5)
+    end
+end
+
+cycleThread = task.spawn(cycleLoop)
+
+if autoMask then
+    task.spawn(maskRoutine)
+end
+
+task.spawn(function()
+    while true do
+        local character = LocalPlayer.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid and humanoid:GetState() == Enum.HumanoidStateType.Seated then
+                humanoid.Sit = false
+                humanoid:ChangeState(Enum.HumanoidStateType.Running)
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+task.spawn(function()
+    RunService.Heartbeat:Connect(function()
+        if idleTeleportEnabled and not busy and not maskBuying then
+            local root = getRoot()
+            if root then
+                root.CFrame = idleLocation
+                root.Velocity = Vector3.zero
+                root.RotVelocity = Vector3.zero
+            end
+        end
+    end)
+end)
+
+repeat task.wait(0.5) until getRoot()
+notify("WOW自动农场", "初始化完成!")
+
+
+else
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "WOW免费版",
+        Text = "当前卡密不存在",
+        Duration = 5
+    })
+end
